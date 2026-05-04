@@ -1,0 +1,187 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches auth.uid)
+    // Fields:
+    //   - uid: string (required, matches userId)
+    //   - email: string (required, email format)
+    //   - role: string (required, 'student' or 'trainer')
+    //   - name: string (max 50 chars)
+    //   - createdAt: string (ISO 8601)
+    //
+    // Collection: drills
+    // Document ID: auto-generated
+    // Fields:
+    //   - title: string (required, max 100 chars)
+    //   - category: string (required, max 50 chars)
+    //   - maxScore: number (required, positive)
+    //   - trainerId: string (required, matches creator)
+    //   - description: string (max 1000 chars)
+    //   - duration: number (positive)
+    //   - difficulty: string (enum: Easy, Medium, Hard)
+    //   - scenario: string (max 2000 chars)
+    //   - createdAt: string (ISO 8601)
+    //
+    // Collection: results
+    // Document ID: auto-generated
+    // Fields:
+    //   - drillId: string (required)
+    //   - studentId: string (required, matches creator)
+    //   - studentName: string (max 50 chars)
+    //   - score: number (required)
+    //   - feedback: string (max 1000 chars, updated by trainer)
+    //   - timestamp: string (ISO 8601)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', 'student') == role;
+    }
+
+    function isTrainer() {
+      return hasRole('trainer');
+    }
+
+    function isStudent() {
+      return hasRole('student');
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+             ((request.auth.token.email == "y.adamabakar81@gmail.com" && request.auth.token.email_verified == true) || 
+              (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+               get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'admin'));
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.*Z?$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      let required = ['uid', 'email', 'role'];
+      let optional = ['name', 'createdAt', 'faculty', 'mahallah', 'updatedAt'];
+      return data.keys().hasOnly(required.concat(optional)) &&
+             data.keys().hasAll(required) &&
+             data.uid == request.auth.uid &&
+             data.role in ['student', 'trainer', 'admin'] &&
+             isValidEmail(data.email) &&
+             (!('name' in data) || (data.name is string && data.name.size() <= 50)) &&
+             (!('faculty' in data) || (data.faculty is string && data.faculty.size() <= 100)) &&
+             (!('mahallah' in data) || (data.mahallah is string && data.mahallah.size() <= 100)) &&
+             (!('createdAt' in data) || isValidDateString(data.createdAt));
+    }
+
+    function isValidDrill(data) {
+      let required = ['title', 'category', 'maxScore', 'trainerId', 'createdAt'];
+      let optional = ['description', 'duration', 'difficulty', 'scenario', 'updatedAt', 'dueDate', 'questions', 'createdBy', 'maxAttempts'];
+      return data.keys().hasOnly(required.concat(optional)) &&
+             data.keys().hasAll(required) &&
+             data.trainerId == request.auth.uid &&
+             data.title is string && data.title.size() <= 100 &&
+             data.category is string && data.category.size() <= 50 &&
+             data.maxScore is number && data.maxScore > 0 &&
+             (!('maxAttempts' in data) || (data.maxAttempts is number && data.maxAttempts > 0)) &&
+             (!('description' in data) || (data.description is string && data.description.size() <= 1000)) &&
+             (!('scenario' in data) || (data.scenario is string && data.scenario.size() <= 2000)) &&
+             (!('difficulty' in data) || data.difficulty in ['beginner', 'intermediate', 'advanced']) &&
+             (!('dueDate' in data) || data.dueDate is string) &&
+             (!('questions' in data) || data.questions is list) &&
+             (!('createdBy' in data) || data.createdBy is string) &&
+             isValidDateString(data.createdAt) &&
+             (!('updatedAt' in data) || isValidDateString(data.updatedAt));
+    }
+
+    function isValidResult(data) {
+      let required = ['drillId', 'studentId', 'score', 'studentName', 'timestamp'];
+      let optional = ['feedback', 'drillTitle', 'maxScore', 'answers', 'status', 'date'];
+      return data.keys().hasOnly(required.concat(optional)) &&
+             data.keys().hasAll(required) &&
+             data.studentId == request.auth.uid &&
+             data.score is number &&
+             data.studentName is string && data.studentName.size() <= 50 &&
+             (!('feedback' in data) || (data.feedback is string && data.feedback.size() <= 1000)) &&
+             (!('status' in data) || (data.status is string && data.status.size() <= 50)) &&
+             (!('date' in data) || (data.date is string && data.date.size() <= 50)) &&
+             isValidDateString(data.timestamp);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      // Owners can read their own profile. Trainers and Admins can read any profile.
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') in ['trainer', 'admin'])
+      );
+
+      // Role protection: Users can set their role on create, but cannot change it on update unless admin.
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && 
+                      isValidUser(request.resource.data) && 
+                      (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /drills/{drillId} {
+      // Authenticated users can browse drills.
+      allow read: if isAuthenticated();
+      
+      // Only trainers can manage drills.
+      allow create: if isTrainer() && isValidDrill(request.resource.data);
+      allow update: if (isTrainer() && (resource.data.trainerId == request.auth.uid || !('trainerId' in resource.data))) && 
+                      isValidDrill(request.resource.data);
+      allow delete: if isAdmin() || isTrainer();
+    }
+
+    match /results/{resultId} {
+      // Students see their own results. Trainers see all results.
+      allow read: if isAuthenticated() && (isTrainer() || resource.data.studentId == request.auth.uid || isAdmin());
+      
+      // Students submit results.
+      allow create: if isStudent() && isValidResult(request.resource.data);
+      
+      // Trainers can update feedback, score, and status.
+      allow update: if isTrainer() && 
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['feedback', 'score', 'status', 'maxScore']) &&
+                      (!('feedback' in request.resource.data) || (request.resource.data.feedback is string && request.resource.data.feedback.size() <= 1000)) &&
+                      (!('score' in request.resource.data) || request.resource.data.score is number) &&
+                      (!('status' in request.resource.data) || (request.resource.data.status is string && request.resource.data.status.size() <= 50)) &&
+                      (!('maxScore' in request.resource.data) || request.resource.data.maxScore is number);
+    }
+  }
+}

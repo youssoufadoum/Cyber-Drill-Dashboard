@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #2563eb;
+  --color-primary-dark: #1d4ed8;
+  --color-secondary: #64748b;
+  --color-accent: #f59e0b;
+  --color-dark: #0f172a;
+  --color-muted: #64748b;
+  --color-surface: #ffffff;
+  --color-surface-border: #e2e8f0;
+}
+
+@layer base {
+  :root {
+    --primary: #2563eb;
+    --primary-dark: #1d4ed8;
+    --secondary: #64748b;
+    --accent: #f59e0b;
+    --dark: #0f172a;
+    --muted: #64748b;
+    --surface: #ffffff;
+    --surface-border: #e2e8f0;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white hover:bg-primary-dark transition-colors;
+  }
+
+  .btn-accent {
+    @apply bg-accent text-white hover:opacity-90 transition-colors;
+  }
+
+  .form-input {
+    @apply border border-surface-border outline-none transition-all focus:border-primary focus:ring-1 focus:ring-primary;
+  }
+
+  .auth-card {
+    @apply shadow-2xl shadow-blue-500/10;
+  }
+
+  .bg-gradient-primary {
+    background: linear-gradient(135deg, var(--primary), var(--primary-dark));
+  }
+
+  .error-text {
+    @apply text-red-500 bg-red-50 p-3 rounded-xl border border-red-100;
+  }
+
+  .stat-icon {
+    @apply w-12 h-12 rounded-xl flex items-center justify-center text-white;
+  }
+}
